@@ -32,7 +32,8 @@ export type GroupEvent = {
   id: string;
   date: string;
   title: string;
-  productTag: "I" | "H" | "both";
+  /** 製品プロジェクトのタグ（I, H, J 等）または both */
+  productTag: string;
   startKey: string;
   endKey: string;
   color: ChartColor;
@@ -76,7 +77,7 @@ function formatPointLabel(year: number, month: number): string {
 }
 
 function buildProjectPhases(
-  projectPrefix: "i" | "h",
+  projectPrefix: string,
   year: number,
   monthOffset: number,
 ): ProjectPhase[] {
@@ -90,6 +91,35 @@ function buildProjectPhases(
       pointLabel: formatPointLabel(year, month),
     };
   });
+}
+
+export function projectSlugFromId(projectId: string): string {
+  return projectId.replace(/^project-/, "");
+}
+
+export function projectTagFromId(projectId: string): string {
+  return projectSlugFromId(projectId).toUpperCase();
+}
+
+export function buildProductProjectFromMeta(
+  meta: {
+    id: string;
+    name: string;
+    accentColor: ChartColor;
+    detail: ProductProject["detail"];
+  },
+  phaseSchedules: Record<string, PhaseSchedulePoint>,
+  year = 2026,
+  monthOffset = 0,
+): ProductProject {
+  const slug = projectSlugFromId(meta.id);
+  const basePhases = buildProjectPhases(slug, year, monthOffset);
+  const phases = basePhases.map((phase) => {
+    const defaults = phaseToSchedulePoint(phase);
+    const point = phaseSchedules[phase.id] ?? defaults;
+    return applyScheduleToPhase(phase, point);
+  });
+  return { ...meta, phases };
 }
 
 /** タイムラインの表示範囲（2026年 1月〜12月） */
@@ -287,6 +317,22 @@ export function formatSchedulePoint(point: PhaseSchedulePoint): string {
   return formatPointLabel(point.year, point.month);
 }
 
+export function toMonthKey(point: PhaseSchedulePoint): string {
+  return monthKey(point.year, point.month);
+}
+
+export function formatPeriodLabel(startKey: string, endKey: string): string {
+  const start = parseMonthKey(startKey);
+  const end = parseMonthKey(endKey);
+  if (startKey === endKey) {
+    return formatPointLabel(start.year, start.month);
+  }
+  if (start.year === end.year) {
+    return `${start.year}年${start.month}月〜${end.month}月`;
+  }
+  return `${formatPointLabel(start.year, start.month)}〜${formatPointLabel(end.year, end.month)}`;
+}
+
 export function applyScheduleToPhase(
   phase: ProjectPhase,
   point: PhaseSchedulePoint,
@@ -356,7 +402,7 @@ export function filterGroupEventsForProject(
   events: GroupEvent[],
   projectId: string,
 ): GroupEvent[] {
-  const tag = projectId === "project-h" ? "H" : "I";
+  const tag = projectTagFromId(projectId);
   return events.filter(
     (event) => event.productTag === tag || event.productTag === "both",
   );
