@@ -9,6 +9,7 @@ import {
   Layers,
   ListTodo,
   Plus,
+  Trash2,
   Users,
 } from "lucide-react";
 
@@ -31,14 +32,19 @@ import {
   projectTagFromId,
   type DepartmentTask,
   type GroupEvent,
+  type PhaseDefinition,
   type PhaseSchedulePoint,
   type ProductProject,
   type ScheduleSelection,
 } from "@/lib/data/schedule-demo";
 import { DepartmentTaskEditor } from "@/components/workspace/DepartmentTaskEditor";
+import { DeleteConfirmDialog } from "@/components/workspace/DeleteConfirmDialog";
 import { GroupEventEditor } from "@/components/workspace/GroupEventEditor";
 import { GroupEventGantt } from "@/components/workspace/GroupEventGantt";
-import { PhaseScheduleEditor } from "@/components/workspace/PhaseScheduleEditor";
+import {
+  PhaseScheduleEditor,
+  type PhaseEditorValue,
+} from "@/components/workspace/PhaseScheduleEditor";
 import { ProductProjectEditor } from "@/components/workspace/ProductProjectEditor";
 import { ProductProjectTimeline } from "@/components/workspace/ProductProjectTimeline";
 
@@ -49,6 +55,11 @@ const STATUS_VARIANT = {
 } as const;
 
 const COLLAPSED_WIDTH = "2.75rem";
+
+type DeleteTarget =
+  | { kind: "project"; id: string; name: string }
+  | { kind: "group"; id: string; name: string }
+  | { kind: "task"; id: string; name: string };
 
 function PaneCollapseHeader({
   icon,
@@ -223,6 +234,9 @@ export function ScheduleWorkspace() {
   const [phaseSchedules, setPhaseSchedules] = useState<
     Record<string, PhaseSchedulePoint>
   >({});
+  const [phaseDefinitions, setPhaseDefinitions] = useState<
+    Record<string, PhaseDefinition>
+  >({});
   const [productProjects, setProductProjects] =
     useState<ProductProject[]>(PRODUCT_PROJECTS);
   const [groupEvents, setGroupEvents] = useState<GroupEvent[]>(GROUP_EVENTS);
@@ -232,6 +246,7 @@ export function ScheduleWorkspace() {
     "loading",
   );
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -246,12 +261,14 @@ export function ScheduleWorkspace() {
         const data = (await res.json()) as {
           productProjects: ProductProject[];
           phaseSchedules: Record<string, PhaseSchedulePoint>;
+          phaseDefinitions: Record<string, PhaseDefinition>;
           groupEvents: GroupEvent[];
           departmentTasks: DepartmentTask[];
         };
         if (cancelled) return;
         setProductProjects(data.productProjects);
         setPhaseSchedules(data.phaseSchedules);
+        setPhaseDefinitions(data.phaseDefinitions);
         setGroupEvents(data.groupEvents);
         setDepartmentTasks(data.departmentTasks);
         setLoadState("ready");
@@ -284,9 +301,13 @@ export function ScheduleWorkspace() {
   const effectiveProjects = useMemo(
     () =>
       productProjects.map((project) =>
-        buildProductProjectFromMeta(projectMeta(project), phaseSchedules),
+        buildProductProjectFromMeta(
+          projectMeta(project),
+          phaseSchedules,
+          phaseDefinitions,
+        ),
       ),
-    [productProjects, phaseSchedules],
+    [productProjects, phaseSchedules, phaseDefinitions],
   );
 
   const productTags = useMemo(
@@ -339,15 +360,25 @@ export function ScheduleWorkspace() {
     return { project, basePhase, point, effective };
   }, [selection, getPhasePoint, effectiveProjects]);
 
-  const updatePhaseSchedule = useCallback(
-    async (phaseId: string, next: PhaseSchedulePoint) => {
-      setPhaseSchedules((prev) => ({ ...prev, [phaseId]: next }));
+  const updatePhase = useCallback(
+    async (phaseId: string, next: PhaseEditorValue) => {
+      setPhaseSchedules((prev) => ({ ...prev, [phaseId]: next.point }));
+      setPhaseDefinitions((prev) => ({
+        ...prev,
+        [phaseId]: next.definition,
+      }));
       setSaveError(null);
       try {
         const res = await fetch("/api/schedule/phases", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phaseId, ...next }),
+          body: JSON.stringify({
+            phaseId,
+            year: next.point.year,
+            month: next.point.month,
+            label: next.definition.label,
+            color: next.definition.color,
+          }),
         });
         if (!res.ok) {
           const body = (await res.json()) as { error?: string };
@@ -449,6 +480,10 @@ export function ScheduleWorkspace() {
       for (const phase of project.phases) {
         const point = phaseToSchedulePoint(phase);
         setPhaseSchedules((prev) => ({ ...prev, [phase.id]: point }));
+        setPhaseDefinitions((prev) => ({
+          ...prev,
+          [phase.id]: { label: phase.label, color: phase.color },
+        }));
       }
       setActiveProjectId(project.id);
       setSelection({
@@ -504,6 +539,119 @@ export function ScheduleWorkspace() {
       );
     }
   }, []);
+
+  const removePhaseState = useCallback((phaseIds: string[]) => {
+    setPhaseSchedules((prev) => {
+      const next = { ...prev };
+      for (const phaseId of phaseIds) delete next[phaseId];
+      return next;
+    });
+    setPhaseDefinitions((prev) => {
+      const next = { ...prev };
+      for (const phaseId of phaseIds) delete next[phaseId];
+      return next;
+    });
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+    setSaveError(null);
+    try {
+      if (deleteTarget.kind === "project") {
+        if (productProjects.length <= 1) {
+          throw new Error("最後の1件は削除できません");
+        }
+        const project = productProjects.find((p) => p.id === deleteTarget.id);
+        const res = await fetch(`/api/schedule/projects/${deleteTarget.id}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) {
+          const body = (await res.json()) as { error?: string };
+          throw new Error(body.error ?? "削除に失敗しました");
+        }
+        const phaseIds = project?.phases.map((phase) => phase.id) ?? [];
+        removePhaseState(phaseIds);
+        const remaining = productProjects.filter(
+          (p) => p.id !== deleteTarget.id,
+        );
+        setProductProjects(remaining);
+        const nextId = remaining[0]?.id;
+        if (nextId) {
+          switchProjectTab(nextId);
+        }
+      } else if (deleteTarget.kind === "group") {
+        const res = await fetch(
+          `/api/schedule/group-events/${deleteTarget.id}`,
+          { method: "DELETE" },
+        );
+        if (!res.ok) {
+          const body = (await res.json()) as { error?: string };
+          throw new Error(body.error ?? "削除に失敗しました");
+        }
+        const remaining = groupEvents.filter((e) => e.id !== deleteTarget.id);
+        setGroupEvents(remaining);
+        if (selection.pane === "group" && selection.id === deleteTarget.id) {
+          const nextEvent = remaining[0];
+          setSelection(
+            nextEvent
+              ? { pane: "group", id: nextEvent.id }
+              : { pane: "product", id: activeProjectId },
+          );
+        }
+      } else {
+        const res = await fetch(
+          `/api/schedule/department-tasks/${deleteTarget.id}`,
+          { method: "DELETE" },
+        );
+        if (!res.ok) {
+          const body = (await res.json()) as { error?: string };
+          throw new Error(body.error ?? "削除に失敗しました");
+        }
+        const remaining = departmentTasks.filter(
+          (t) => t.id !== deleteTarget.id,
+        );
+        setDepartmentTasks(remaining);
+        if (selection.pane === "task" && selection.id === deleteTarget.id) {
+          const nextTask = remaining[0];
+          setSelection(
+            nextTask
+              ? { pane: "task", id: nextTask.id }
+              : { pane: "product", id: activeProjectId },
+          );
+        }
+      }
+      setDeleteTarget(null);
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : "削除に失敗しました",
+      );
+    }
+  }, [
+    deleteTarget,
+    productProjects,
+    groupEvents,
+    departmentTasks,
+    selection,
+    activeProjectId,
+    removePhaseState,
+    switchProjectTab,
+  ]);
+
+  const selectedGroupEvent = useMemo(
+    () =>
+      selection.pane === "group"
+        ? groupEvents.find((event) => event.id === selection.id)
+        : undefined,
+    [selection, groupEvents],
+  );
+
+  const selectedDepartmentTask = useMemo(
+    () =>
+      selection.pane === "task"
+        ? departmentTasks.find((task) => task.id === selection.id)
+        : undefined,
+    [selection, departmentTasks],
+  );
 
   const detail = useMemo(() => {
     if (selection.pane === "product") {
@@ -646,6 +794,24 @@ export function ScheduleWorkspace() {
               <Plus className="size-3.5" aria-hidden />
               プロジェクト追加
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1 px-2 text-xs text-destructive hover:text-destructive"
+              disabled={productProjects.length <= 1 || !activeProject}
+              onClick={() =>
+                activeProject &&
+                setDeleteTarget({
+                  kind: "project",
+                  id: activeProject.id,
+                  name: activeProject.name,
+                })
+              }
+            >
+              <Trash2 className="size-3.5" aria-hidden />
+              プロジェクト削除
+            </Button>
           </div>
 
           {activeProject ? (
@@ -702,6 +868,24 @@ export function ScheduleWorkspace() {
             <Plus className="size-3.5" aria-hidden />
             イベント追加
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2 h-7 w-full gap-1 text-xs text-destructive hover:text-destructive"
+            disabled={!selectedGroupEvent}
+            onClick={() =>
+              selectedGroupEvent &&
+              setDeleteTarget({
+                kind: "group",
+                id: selectedGroupEvent.id,
+                name: selectedGroupEvent.title,
+              })
+            }
+          >
+            <Trash2 className="size-3.5" aria-hidden />
+            イベント削除
+          </Button>
         </HorizontalCollapsiblePane>
 
         <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
@@ -753,6 +937,24 @@ export function ScheduleWorkspace() {
               <Plus className="size-3.5" aria-hidden />
               タスク追加
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2 h-7 w-full gap-1 text-xs text-destructive hover:text-destructive"
+              disabled={!selectedDepartmentTask}
+              onClick={() =>
+                selectedDepartmentTask &&
+                setDeleteTarget({
+                  kind: "task",
+                  id: selectedDepartmentTask.id,
+                  name: selectedDepartmentTask.title,
+                })
+              }
+            >
+              <Trash2 className="size-3.5" aria-hidden />
+              タスク削除
+            </Button>
           </HorizontalCollapsiblePane>
 
           <HorizontalCollapsiblePane
@@ -776,13 +978,18 @@ export function ScheduleWorkspace() {
                   <CardContent className="flex flex-col gap-3 px-4 pb-4 pt-0">
                     {detail.showPhaseEditor && selectedPhaseContext ? (
                       <PhaseScheduleEditor
-                        phaseLabel={selectedPhaseContext.effective.label}
-                        point={selectedPhaseContext.point}
+                        value={{
+                          definition:
+                            phaseDefinitions[
+                              selectedPhaseContext.basePhase.id
+                            ] ?? {
+                              label: selectedPhaseContext.effective.label,
+                              color: selectedPhaseContext.effective.color,
+                            },
+                          point: selectedPhaseContext.point,
+                        }}
                         onChange={(next) =>
-                          updatePhaseSchedule(
-                            selectedPhaseContext.basePhase.id,
-                            next,
-                          )
+                          updatePhase(selectedPhaseContext.basePhase.id, next)
                         }
                       />
                     ) : null}
@@ -838,6 +1045,22 @@ export function ScheduleWorkspace() {
           </HorizontalCollapsiblePane>
         </div>
       </main>
+
+      <DeleteConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={
+          deleteTarget?.kind === "project"
+            ? "プロジェクトを削除"
+            : deleteTarget?.kind === "group"
+              ? "イベントを削除"
+              : "タスクを削除"
+        }
+        itemName={deleteTarget?.name ?? ""}
+        onConfirm={() => void confirmDelete()}
+      />
     </div>
   );
 }

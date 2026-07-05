@@ -1,5 +1,8 @@
-import { savePhaseSchedule } from "@/lib/db/schedule-repository";
-import type { PhaseSchedulePoint } from "@/lib/data/schedule-demo";
+import {
+  savePhaseDefinition,
+  savePhaseSchedule,
+} from "@/lib/db/schedule-repository";
+import type { ChartColor, PhaseSchedulePoint } from "@/lib/data/schedule-demo";
 
 export async function PUT(request: Request) {
   try {
@@ -7,26 +10,35 @@ export async function PUT(request: Request) {
       phaseId?: string;
       year?: number;
       month?: number;
+      label?: string;
+      color?: ChartColor;
     };
 
-    if (!body.phaseId || body.year == null || body.month == null) {
-      return Response.json(
-        { error: "phaseId, year, month が必要です" },
-        { status: 400 },
-      );
+    if (!body.phaseId) {
+      return Response.json({ error: "phaseId が必要です" }, { status: 400 });
     }
 
-    const point: PhaseSchedulePoint = {
-      year: Number(body.year),
-      month: Number(body.month),
-    };
+    if (body.year != null && body.month != null) {
+      const point: PhaseSchedulePoint = {
+        year: Number(body.year),
+        month: Number(body.month),
+      };
 
-    if (point.month < 1 || point.month > 12) {
-      return Response.json({ error: "month は 1〜12 です" }, { status: 400 });
+      if (point.month < 1 || point.month > 12) {
+        return Response.json({ error: "month は 1〜12 です" }, { status: 400 });
+      }
+
+      await savePhaseSchedule(body.phaseId, point);
     }
 
-    await savePhaseSchedule(body.phaseId, point);
-    return Response.json({ ok: true, phaseId: body.phaseId, point });
+    if (body.label != null && body.color != null) {
+      await savePhaseDefinition(body.phaseId, {
+        label: body.label,
+        color: body.color,
+      });
+    }
+
+    return Response.json({ ok: true, phaseId: body.phaseId });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "保存に失敗しました";

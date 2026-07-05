@@ -11,33 +11,82 @@ import {
 } from "@/components/ui/select";
 import {
   formatSchedulePoint,
+  type ChartColor,
+  type PhaseDefinition,
   type PhaseSchedulePoint,
 } from "@/lib/data/schedule-demo";
 
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1);
 
-type PhaseScheduleEditorProps = {
-  phaseLabel: string;
+const COLOR_OPTIONS: { value: ChartColor; label: string }[] = [
+  { value: "chart-1", label: "色1" },
+  { value: "chart-2", label: "色2" },
+  { value: "chart-3", label: "色3" },
+  { value: "chart-4", label: "色4" },
+  { value: "chart-5", label: "色5" },
+];
+
+export type PhaseEditorValue = {
+  definition: PhaseDefinition;
   point: PhaseSchedulePoint;
-  onChange: (next: PhaseSchedulePoint) => void;
 };
 
-export function PhaseScheduleEditor({
-  phaseLabel,
-  point,
-  onChange,
-}: PhaseScheduleEditorProps) {
-  const patch = (partial: Partial<PhaseSchedulePoint>) => {
-    onChange({ ...point, ...partial });
+type PhaseScheduleEditorProps = {
+  value: PhaseEditorValue;
+  onChange: (next: PhaseEditorValue) => void;
+};
+
+export function PhaseScheduleEditor({ value, onChange }: PhaseScheduleEditorProps) {
+  const patchPoint = (partial: Partial<PhaseSchedulePoint>) => {
+    onChange({ ...value, point: { ...value.point, ...partial } });
+  };
+
+  const patchDefinition = (partial: Partial<PhaseDefinition>) => {
+    onChange({
+      ...value,
+      definition: { ...value.definition, ...partial },
+    });
   };
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
       <div>
-        <p className="text-[10px] font-semibold text-primary">実施ポイント（年・月）</p>
+        <p className="text-[10px] font-semibold text-primary">フェーズ編集</p>
         <p className="text-[10px] text-muted-foreground">
-          {phaseLabel} がいつあるかを1点で指定します。①のタイムライン上の丸位置も連動します。
+          ①の表示名（企画書A、PMT 等）と実施ポイント（年・月）を編集します。変更は自動で保存されます。
         </p>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <Label htmlFor="phase-label" className="text-[10px]">
+          フェーズ名
+        </Label>
+        <Input
+          id="phase-label"
+          value={value.definition.label}
+          onChange={(e) => patchDefinition({ label: e.target.value })}
+          className="h-8 text-xs"
+          placeholder="企画書A"
+        />
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <Label className="text-[10px]">表示色</Label>
+        <Select
+          value={value.definition.color}
+          onValueChange={(v) => v && patchDefinition({ color: v as ChartColor })}
+        >
+          <SelectTrigger className="h-8 w-full text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {COLOR_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -50,9 +99,9 @@ export function PhaseScheduleEditor({
             type="number"
             min={2020}
             max={2035}
-            value={point.year}
+            value={value.point.year}
             onChange={(e) =>
-              patch({ year: Number(e.target.value) || point.year })
+              patchPoint({ year: Number(e.target.value) || value.point.year })
             }
             className="h-8 text-xs"
           />
@@ -62,8 +111,8 @@ export function PhaseScheduleEditor({
             月
           </Label>
           <Select
-            value={String(point.month)}
-            onValueChange={(v) => patch({ month: Number(v) })}
+            value={String(value.point.month)}
+            onValueChange={(v) => patchPoint({ month: Number(v) })}
           >
             <SelectTrigger id="point-month" className="h-8 w-full text-xs">
               <SelectValue />
@@ -80,7 +129,7 @@ export function PhaseScheduleEditor({
       </div>
 
       <p className="rounded-md border border-border bg-background px-2 py-1.5 text-xs font-medium">
-        表示: {formatSchedulePoint(point)}
+        表示: {value.definition.label} — {formatSchedulePoint(value.point)}
       </p>
     </div>
   );

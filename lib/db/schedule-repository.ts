@@ -12,6 +12,7 @@ import {
   type ChartColor,
   type DepartmentTask,
   type GroupEvent,
+  type PhaseDefinition,
   type PhaseSchedulePoint,
   type ProductProject,
 } from "@/lib/data/schedule-demo";
@@ -21,6 +22,12 @@ type PhaseScheduleRow = {
   phase_id: string;
   year: number;
   month: number;
+};
+
+type PhaseDefinitionRow = {
+  phase_id: string;
+  label: string;
+  color: string;
 };
 
 type GroupEventRow = {
@@ -60,6 +67,7 @@ type ProductProjectRow = {
 export type ScheduleData = {
   productProjects: ProductProject[];
   phaseSchedules: Record<string, PhaseSchedulePoint>;
+  phaseDefinitions: Record<string, PhaseDefinition>;
   groupEvents: GroupEvent[];
   departmentTasks: DepartmentTask[];
 };
@@ -120,9 +128,14 @@ function rowToProductProjectMeta(row: ProductProjectRow) {
 function buildProjectsFromRows(
   rows: ProductProjectRow[],
   phaseSchedules: Record<string, PhaseSchedulePoint>,
+  phaseDefinitions: Record<string, PhaseDefinition>,
 ): ProductProject[] {
   return rows.map((row) =>
-    buildProductProjectFromMeta(rowToProductProjectMeta(row), phaseSchedules),
+    buildProductProjectFromMeta(
+      rowToProductProjectMeta(row),
+      phaseSchedules,
+      phaseDefinitions,
+    ),
   );
 }
 
@@ -147,6 +160,14 @@ export async function ensureScheduleSchema() {
       phase_id TEXT PRIMARY KEY,
       year INTEGER NOT NULL,
       month INTEGER NOT NULL CHECK (month >= 1 AND month <= 12)
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS phase_definitions (
+      phase_id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      color TEXT NOT NULL
     )
   `;
 
@@ -220,9 +241,57 @@ async function seedPhaseSchedules() {
   }
 }
 
+async function seedPhaseDefinitions() {
+  const sql = getSql();
+  const defCount =
+    await sql`SELECT COUNT(*)::int AS count FROM phase_definitions`;
+  if (defCount[0]?.count !== 0) return;
+
+  for (const project of PRODUCT_PROJECTS) {
+    for (const phase of project.phases) {
+      await sql`
+        INSERT INTO phase_definitions (phase_id, label, color)
+        VALUES (${phase.id}, ${phase.label}, ${phase.color})
+      `;
+    }
+  }
+}
+
+async function ensurePhaseDefinitions() {
+  const sql = getSql();
+  const projectRows = (await sql`
+    SELECT id, slug FROM product_projects
+  `) as { id: string; slug: string }[];
+
+  for (const row of projectRows) {
+    const seedProject = PRODUCT_PROJECTS.find((project) => project.id === row.id);
+    const defs = seedProject
+      ? seedProject.phases.map((phase) => ({
+          phaseId: phase.id,
+          label: phase.label,
+          color: phase.color,
+        }))
+      : STANDARD_PROJECT_PHASES.map((def) => ({
+          phaseId: `${row.slug}-${def.slug}`,
+          label: def.label,
+          color: def.color,
+        }));
+
+    for (const def of defs) {
+      await sql`
+        INSERT INTO phase_definitions (phase_id, label, color)
+        VALUES (${def.phaseId}, ${def.label}, ${def.color})
+        ON CONFLICT (phase_id) DO NOTHING
+      `;
+    }
+  }
+}
+
 async function seedIfEmpty() {
   await seedProductProjects();
   await seedPhaseSchedules();
+  await seedPhaseDefinitions();
+  await ensurePhaseDefinitions();
 
   const sql = getSql();
 
@@ -272,6 +341,7 @@ async function seedIfEmpty() {
 export async function loadScheduleData(): Promise<ScheduleData> {
   await ensureScheduleSchema();
   await seedIfEmpty();
+  await ensurePhaseDefinitions();
 
   const sql = getSql();
 
@@ -289,6 +359,17 @@ export async function loadScheduleData(): Promise<ScheduleData> {
     phaseSchedules[row.phase_id] = { year: row.year, month: row.month };
   }
 
+  const definitionRows = (await sql`
+    SELECT phase_id, label, color FROM phase_definitions
+  `) as PhaseDefinitionRow[];
+  const phaseDefinitions: Record<string, PhaseDefinition> = {};
+  for (const row of definitionRows) {
+    phaseDefinitions[row.phase_id] = {
+      label: row.label,
+      color: row.color as ChartColor,
+    };
+  }
+
   const eventRows = (await sql`
     SELECT id, title, date, product_tag, start_key, end_key, color, impact, owner, note
     FROM group_events
@@ -302,11 +383,30 @@ export async function loadScheduleData(): Promise<ScheduleData> {
   `) as DepartmentTaskRow[];
 
   return {
-    productProjects: buildProjectsFromRows(projectRows, phaseSchedules),
+    productProjects: buildProjectsFromRows(
+      projectRows,
+      phaseSchedules,
+      phaseDefinitions,
+    ),
     phaseSchedules,
+    phaseDefinitions,
     groupEvents: eventRows.map(rowToGroupEvent),
     departmentTasks: taskRows.map(rowToDepartmentTask),
   };
+}
+
+export async function savePhaseDefinition(
+  phaseId: string,
+  definition: PhaseDefinition,
+) {
+  const sql = getSql();
+  await sql`
+    INSERT INTO phase_definitions (phase_id, label, color)
+    VALUES (${phaseId}, ${definition.label}, ${definition.color})
+    ON CONFLICT (phase_id) DO UPDATE SET
+      label = EXCLUDED.label,
+      color = EXCLUDED.color
+  `;
 }
 
 export async function savePhaseSchedule(
@@ -452,11 +552,18 @@ export async function createProductProject(name?: string): Promise<ProductProjec
       INSERT INTO phase_schedules (phase_id, year, month)
       VALUES (${phaseId}, ${2026}, ${def.pointMonth})
     `;
+    await sql`
+      INSERT INTO phase_definitions (phase_id, label, color)
+      VALUES (${phaseId}, ${def.label}, ${def.color})
+    `;
   }
 
   const phaseSchedules: Record<string, PhaseSchedulePoint> = {};
+  const phaseDefinitions: Record<string, PhaseDefinition> = {};
   for (const def of STANDARD_PROJECT_PHASES) {
-    phaseSchedules[`${slug}-${def.slug}`] = { year: 2026, month: def.pointMonth };
+    const phaseId = `${slug}-${def.slug}`;
+    phaseSchedules[phaseId] = { year: 2026, month: def.pointMonth };
+    phaseDefinitions[phaseId] = { label: def.label, color: def.color };
   }
 
   return buildProductProjectFromMeta(
@@ -467,6 +574,7 @@ export async function createProductProject(name?: string): Promise<ProductProjec
       detail: { phase: "企画提案〜MP", departments: "開発部", note: "" },
     },
     phaseSchedules,
+    phaseDefinitions,
   );
 }
 
@@ -510,4 +618,48 @@ export async function createDepartmentTask(): Promise<DepartmentTask> {
 
 export function defaultProductTagForProject(projectId: string): string {
   return projectTagFromId(projectId);
+}
+
+export async function deleteProductProject(projectId: string): Promise<void> {
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT slug FROM product_projects WHERE id = ${projectId}
+  `) as { slug: string }[];
+
+  if (rows.length === 0) {
+    throw new Error("プロジェクトが見つかりません");
+  }
+
+  const slug = rows[0].slug;
+  const phasePrefix = `${slug}-`;
+
+  await sql`
+    DELETE FROM phase_schedules
+    WHERE phase_id LIKE ${`${phasePrefix}%`}
+  `;
+  await sql`
+    DELETE FROM phase_definitions
+    WHERE phase_id LIKE ${`${phasePrefix}%`}
+  `;
+  await sql`DELETE FROM product_projects WHERE id = ${projectId}`;
+}
+
+export async function deleteGroupEvent(eventId: string): Promise<void> {
+  const sql = getSql();
+  const result = await sql`
+    DELETE FROM group_events WHERE id = ${eventId} RETURNING id
+  `;
+  if (result.length === 0) {
+    throw new Error("イベントが見つかりません");
+  }
+}
+
+export async function deleteDepartmentTask(taskId: string): Promise<void> {
+  const sql = getSql();
+  const result = await sql`
+    DELETE FROM department_tasks WHERE id = ${taskId} RETURNING id
+  `;
+  if (result.length === 0) {
+    throw new Error("タスクが見つかりません");
+  }
 }

@@ -109,11 +109,16 @@ export function buildProductProjectFromMeta(
     detail: ProductProject["detail"];
   },
   phaseSchedules: Record<string, PhaseSchedulePoint>,
+  phaseDefinitions: Record<string, PhaseDefinition> = {},
   year = 2026,
   monthOffset = 0,
 ): ProductProject {
   const slug = projectSlugFromId(meta.id);
-  const basePhases = buildProjectPhases(slug, year, monthOffset);
+  const basePhases = buildProjectPhases(slug, year, monthOffset).map((phase) => {
+    const def = phaseDefinitions[phase.id];
+    if (!def) return phase;
+    return { ...phase, label: def.label, color: def.color };
+  });
   const phases = basePhases.map((phase) => {
     const defaults = phaseToSchedulePoint(phase);
     const point = phaseSchedules[phase.id] ?? defaults;
@@ -140,9 +145,59 @@ export const PRODUCT_PROJECTS: ProductProject[] = [
     id: "project-i",
     name: "プロジェクト I",
     accentColor: "chart-1",
-    phases: buildProjectPhases("i", 2026, 0),
+    phases: [
+      {
+        id: "i-proposal",
+        label: "企画提案",
+        pointKey: monthKey(2026, 1),
+        color: "chart-1",
+        pointLabel: formatPointLabel(2026, 1),
+      },
+      {
+        id: "i-plan-a",
+        label: "企画書1",
+        pointKey: monthKey(2026, 2),
+        color: "chart-2",
+        pointLabel: formatPointLabel(2026, 2),
+      },
+      {
+        id: "i-plan-b",
+        label: "企画書",
+        pointKey: monthKey(2026, 3),
+        color: "chart-3",
+        pointLabel: formatPointLabel(2026, 3),
+      },
+      {
+        id: "i-dmt",
+        label: "開発試作",
+        pointKey: monthKey(2026, 4),
+        color: "chart-4",
+        pointLabel: formatPointLabel(2026, 4),
+      },
+      {
+        id: "i-pmt",
+        label: "量産試作",
+        pointKey: monthKey(2026, 5),
+        color: "chart-5",
+        pointLabel: formatPointLabel(2026, 5),
+      },
+      {
+        id: "i-pp",
+        label: "生産前確認",
+        pointKey: monthKey(2026, 7),
+        color: "chart-1",
+        pointLabel: formatPointLabel(2026, 7),
+      },
+      {
+        id: "i-mp",
+        label: "生産開始",
+        pointKey: monthKey(2026, 10),
+        color: "chart-2",
+        pointLabel: formatPointLabel(2026, 10),
+      },
+    ],
     detail: {
-      phase: "企画提案〜MP",
+      phase: "企画提案〜生産かいｓ",
       departments: "開発部・品質保証部",
       note: "標準7項目の順でスケジュールを管理（ダミー）。",
     },
@@ -151,9 +206,59 @@ export const PRODUCT_PROJECTS: ProductProject[] = [
     id: "project-h",
     name: "プロジェクト H",
     accentColor: "chart-4",
-    phases: buildProjectPhases("h", 2026, 0),
+    phases: [
+      {
+        id: "h-proposal",
+        label: "企画提案",
+        pointKey: monthKey(2026, 1),
+        color: "chart-1",
+        pointLabel: formatPointLabel(2026, 1),
+      },
+      {
+        id: "h-plan-a",
+        label: "企画書",
+        pointKey: monthKey(2026, 2),
+        color: "chart-2",
+        pointLabel: formatPointLabel(2026, 2),
+      },
+      {
+        id: "h-plan-b",
+        label: "企画書2",
+        pointKey: monthKey(2026, 3),
+        color: "chart-3",
+        pointLabel: formatPointLabel(2026, 3),
+      },
+      {
+        id: "h-dmt",
+        label: "開発試作",
+        pointKey: monthKey(2026, 4),
+        color: "chart-4",
+        pointLabel: formatPointLabel(2026, 4),
+      },
+      {
+        id: "h-pmt",
+        label: "量産試作",
+        pointKey: monthKey(2026, 5),
+        color: "chart-5",
+        pointLabel: formatPointLabel(2026, 5),
+      },
+      {
+        id: "h-pp",
+        label: "生産前確認",
+        pointKey: monthKey(2026, 7),
+        color: "chart-1",
+        pointLabel: formatPointLabel(2026, 7),
+      },
+      {
+        id: "h-mp",
+        label: "生産開始",
+        pointKey: monthKey(2026, 10),
+        color: "chart-2",
+        pointLabel: formatPointLabel(2026, 10),
+      },
+    ],
     detail: {
-      phase: "企画提案〜MP",
+      phase: "企画提案〜生産開始",
       departments: "開発部",
       note: "プロジェクト I と同じ7項目・同順。実務では開始月をずらす想定（ダミー）。",
     },
@@ -161,21 +266,6 @@ export const PRODUCT_PROJECTS: ProductProject[] = [
 ];
 
 export const GROUP_EVENTS: GroupEvent[] = [
-  {
-    id: "evt-review",
-    date: "3/18",
-    title: "設計レビュー",
-    productTag: "I",
-    startKey: monthKey(2026, 3),
-    endKey: monthKey(2026, 3),
-    color: "chart-1",
-    periodLabel: "2026年3月",
-    detail: {
-      impact: "プロジェクト I",
-      owner: "プロジェクトリーダー",
-      note: "試作1次の結果を共有し、次フェーズの前提を確定。",
-    },
-  },
   {
     id: "evt-proto2",
     date: "3/25",
@@ -189,6 +279,21 @@ export const GROUP_EVENTS: GroupEvent[] = [
       impact: "プロジェクト H",
       owner: "開発部",
       note: "配合・耐久の中間評価を実施。",
+    },
+  },
+  {
+    id: "evt-review",
+    date: "3/18",
+    title: "設計レビュー",
+    productTag: "I",
+    startKey: monthKey(2026, 3),
+    endKey: monthKey(2026, 3),
+    color: "chart-1",
+    periodLabel: "2026年3月",
+    detail: {
+      impact: "プロジェクト I",
+      owner: "プロジェクトリーダー",
+      note: "試作1次の結果を共有し、次フェーズの前提を確定。",
     },
   },
   {
@@ -208,7 +313,7 @@ export const GROUP_EVENTS: GroupEvent[] = [
   },
   {
     id: "evt-report",
-    date: "4/22",
+    date: "5/22",
     title: "月次進捗報告",
     productTag: "both",
     startKey: monthKey(2026, 4),
@@ -221,31 +326,24 @@ export const GROUP_EVENTS: GroupEvent[] = [
       note: "部門タスクの完了状況を一覧で確認。",
     },
   },
+  {
+    id: "evt-mr741y3x",
+    date: "5/15",
+    title: "生産性改善",
+    productTag: "D",
+    startKey: monthKey(2026, 5),
+    endKey: monthKey(2026, 10),
+    color: "chart-3",
+    periodLabel: "2026年5月〜10月",
+    detail: {
+      impact: "プロジェクト D",
+      owner: "",
+      note: "",
+    },
+  },
 ];
 
 export const DEPARTMENT_TASKS: DepartmentTask[] = [
-  {
-    id: "task-blend",
-    title: "配合試験",
-    status: "進行中",
-    due: "3/28",
-    detail: {
-      assignee: "開発部 A",
-      blocker: "なし",
-      note: "試作2次に向けた配合条件の最終調整。",
-    },
-  },
-  {
-    id: "task-durability",
-    title: "耐久試験",
-    status: "未着手",
-    due: "4/05",
-    detail: {
-      assignee: "品質保証部 B",
-      blocker: "試料手配待ち",
-      note: "設計レビュー承認後に開始。",
-    },
-  },
   {
     id: "task-report",
     title: "評価レポート提出",
@@ -255,6 +353,17 @@ export const DEPARTMENT_TASKS: DepartmentTask[] = [
       assignee: "開発部 C",
       blocker: "なし",
       note: "試作1次の結果をまとめ済み。",
+    },
+  },
+  {
+    id: "task-blend",
+    title: "配合試験",
+    status: "進行中",
+    due: "3/28",
+    detail: {
+      assignee: "開発部 A",
+      blocker: "なし",
+      note: "試作2次に向けた配合条件の最終調整。",
     },
   },
   {
@@ -269,6 +378,28 @@ export const DEPARTMENT_TASKS: DepartmentTask[] = [
     },
   },
   {
+    id: "task-qa",
+    title: "工程内検査計画",
+    status: "進行中",
+    due: "4/01",
+    detail: {
+      assignee: "品質保証部 F",
+      blocker: "なし",
+      note: "量産立ち上げ前の検査ポイント定義。",
+    },
+  },
+  {
+    id: "task-durability",
+    title: "耐久試験",
+    status: "未着手",
+    due: "4/05",
+    detail: {
+      assignee: "品質保証部 B",
+      blocker: "試料手配待ち",
+      note: "設計レビュー承認後に開始。",
+    },
+  },
+  {
     id: "task-sample",
     title: "サンプル送付",
     status: "未着手",
@@ -280,14 +411,14 @@ export const DEPARTMENT_TASKS: DepartmentTask[] = [
     },
   },
   {
-    id: "task-qa",
-    title: "工程内検査計画",
+    id: "task-mr743ueu",
+    title: "材料軽量",
     status: "進行中",
-    due: "4/01",
+    due: "6/18",
     detail: {
-      assignee: "品質保証部 F",
+      assignee: "S氏",
       blocker: "なし",
-      note: "量産立ち上げ前の検査ポイント定義。",
+      note: "",
     },
   },
 ];
@@ -297,10 +428,15 @@ export type ScheduleSelection =
   | { pane: "group"; id: string }
   | { pane: "task"; id: string };
 
-/** ④で編集するフェーズの実施ポイント（年月） */
 export type PhaseSchedulePoint = {
   year: number;
   month: number;
+};
+
+/** フェーズ名・色（①の表示ラベル） */
+export type PhaseDefinition = {
+  label: string;
+  color: ChartColor;
 };
 
 export function parseMonthKey(key: string): { year: number; month: number } {

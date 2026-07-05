@@ -10,6 +10,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:radius": "node scripts/check-radius-drift.mjs",
+    "export:schedule-seed": "node scripts/export-schedule-seed.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
